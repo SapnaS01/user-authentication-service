@@ -1,0 +1,231 @@
+databaseChangeLog:
+  - changeSet:
+      id: 001-create-users-table
+      author: sapna
+      changes:
+        - createTable:
+            tableName: users
+            columns:
+              - column:
+                  name: id
+                  type: VARCHAR(50)
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: first_name
+                  type: VARCHAR(50)
+              - column:
+                  name: last_name
+                  type: VARCHAR(50)
+              - column:
+                  name: profile_image
+                  type: VARCHAR(512)
+              - column:
+                  name: is_verified
+                  type: BOOLEAN
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: DATETIME(6)
+              - column:
+                  name: deleted_at
+                  type: DATETIME(6)
+
+  - changeSet:
+      id: 002-create-phones-table
+      author: sapna
+      changes:
+        - createTable:
+            tableName: phones
+            columns:
+              - column:
+                  name: id
+                  type: VARCHAR(50)
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: phone
+                  type: VARCHAR(10)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: is_primary
+                  type: BOOLEAN
+              - column:
+                  name: user_id
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: created_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: DATETIME(6)
+              - column:
+                  name: deleted_at
+                  type: DATETIME(6)
+        - addForeignKeyConstraint:
+            baseTableName: phones
+            baseColumnNames: user_id
+            constraintName: fk_phones_user
+            referencedTableName: users
+            referencedColumnNames: id
+            onDelete: CASCADE
+
+  - changeSet:
+      id: 003-create-emails-table
+      author: sapna
+      changes:
+        - createTable:
+            tableName: emails
+            columns:
+              - column:
+                  name: id
+                  type: VARCHAR(50)
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: email
+                  type: VARCHAR(255)
+              - column:
+                  name: is_primary
+                  type: BOOLEAN
+              - column:
+                  name: user_id
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: DATETIME(6)
+              - column:
+                  name: deleted_at
+                  type: DATETIME(6)
+        - addForeignKeyConstraint:
+            baseTableName: emails
+            baseColumnNames: user_id
+            constraintName: fk_emails_user
+            referencedTableName: users
+            referencedColumnNames: id
+            onDelete: CASCADE
+
+  - changeSet:
+      id: 004-create-refresh-tokens-table
+      author: sapna
+      changes:
+        - createTable:
+            tableName: refresh_tokens
+            columns:
+              - column:
+                  name: id
+                  type: VARCHAR(50)
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: token
+                  type: VARCHAR(512)
+                  constraints:
+                    nullable: false
+                    unique: true
+              - column:
+                  name: user_id
+                  type: VARCHAR(50)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: expires_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: revoked
+                  type: BOOLEAN
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+        - addForeignKeyConstraint:
+            baseTableName: refresh_tokens
+            baseColumnNames: user_id
+            constraintName: fk_refresh_token_user
+            referencedTableName: users
+            referencedColumnNames: id
+            onDelete: CASCADE
+
+  - changeSet:
+      id: 005-create-otp-cache-table
+      author: sapna
+      changes:
+        - createTable:
+            tableName: otp_cache
+            columns:
+              - column:
+                  name: id
+                  type: VARCHAR(50)
+                  constraints:
+                    primaryKey: true
+                    nullable: false
+              - column:
+                  name: otp
+                  type: VARCHAR(4)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: phone
+                  type: VARCHAR(10)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: action
+                  type: VARCHAR(10)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: created_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: expires_at
+                  type: DATETIME(6)
+                  constraints:
+                    nullable: false
+              - column:
+                  name: updated_at
+                  type: DATETIME(6)
+              - column:
+                  name: deleted_at
+                  type: DATETIME(6)
+
+  - changeSet:
+      id: 006-add-otp-cache-check-constraint
+      author: sapna
+      changes:
+        - sql:
+            splitStatements: false
+            sql: >
+              ALTER TABLE otp_cache
+              ADD CONSTRAINT chk_otp_cache_action_enum
+              CHECK (action IN ('REGISTER', 'LOGIN', 'DELETE'));
