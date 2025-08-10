@@ -1,20 +1,26 @@
 package com.self.userauth.service.impl;
 
-import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
 import com.self.userauth.exception.BadRequestException;
+import com.self.userauth.model.Emails;
 import com.self.userauth.model.OtpCache;
+import com.self.userauth.model.Phones;
+import com.self.userauth.model.RefreshTokens;
+import com.self.userauth.model.User;
 import com.self.userauth.model.enums.OtpAction;
 import com.self.userauth.pojo.AuthResponse;
 import com.self.userauth.repository.OtpCacheRepository;
 import com.self.userauth.repository.PhonesRepository;
+import com.self.userauth.repository.UserRepository;
 import com.self.userauth.service.inter.AuthServiceInter;
 
 import lombok.RequiredArgsConstructor;
@@ -25,8 +31,8 @@ public class AuthService implements AuthServiceInter {
 
 	private final PhonesRepository phonesRepository;
 	private final OtpService otpService;
-	//	private final RedisTemplate<String, String> redisTemplate;
 	private final OtpCacheRepository otpCacheRepository;
+	private final UserRepository userRepository;
 	private final Map<String, Map<String, Object>> otpInMemoryCache = new ConcurrentHashMap<>();
 
 
@@ -37,10 +43,9 @@ public class AuthService implements AuthServiceInter {
 		}
 		String otp = otpService.generateOtp();
 
-		// otpService.sendOtp(phone, otp);
+		// TODO: otpService.sendOtp(phone, otp);
 
 		LocalDateTime expiresAt = LocalDateTime.now().plusMinutes(5);
-
 		OtpCache otpCache = OtpCache.builder()
 				.phone(phone)
 				.otp(otp)
@@ -50,11 +55,7 @@ public class AuthService implements AuthServiceInter {
 
 		otpCacheRepository.save(otpCache);
 
-		//       Save OTP to Redis with expiry
-		//        redisTemplate.opsForValue().set("otp:register:" + phone, otp, Duration.ofMinutes(5));
-		//        in order to avoid using redis setup, we can use a map to store the OTP temporarily
 
-		// Save in in-memory map (acting like Redis)
 		Map<String, Object> otpData = new HashMap<>();
 		otpData.put("otp", otp);
 		otpData.put("expiresAt", expiresAt);
@@ -80,16 +81,90 @@ public class AuthService implements AuthServiceInter {
 		if (!cachedOtp.equals(otp)) {
 			throw new BadRequestException("Invalid OTP");
 		}
-		
-		
-		// Remove OTP after successful verification
+
+
+		// Remove OTP after verification
 		otpInMemoryCache.remove("otp:register:" + phone);
-		
-//		// Save the details to the database		
-		
-		return new AuthResponse(true, "OTP verified successfully", null);
 
+		// Generate temporary token
+		String tempToken = java.util.UUID.randomUUID().toString();
 
+		//		save the phone number as verified in the cache for future reference
+		Map<String, Object> verifiedData = new HashMap<>();
+		verifiedData.put("phone", phone);
+		verifiedData.put("isVerified", true);
+		verifiedData.put("verifiedAt", LocalDateTime.now());  
+
+		otpInMemoryCache.put("register-session:" + tempToken, verifiedData);
+
+		return new AuthResponse(true, "OTP verified successfully", tempToken);
+
+	}
+
+	@Override
+	public AuthResponse completeRegistration(String firstName, String lastName, String email, String tempToken) {
+	    Map<String, Object> verifiedData = otpInMemoryCache.get("register-session:" + tempToken);
+
+	    if (verifiedData == null || !(Boolean) verifiedData.getOrDefault("isVerified", false)) {
+	        throw new BadRequestException("Phone number not verified or session expired");
+	    }
+
+	    String phoneNumber = (String) verifiedData.get("phone");
+
+	    // Create phone entity
+	    Phones phone = Phones.builder()
+	            .phone(phoneNumber)
+	            .isPrimary(true)
+	            .build();
+
+	    // Create user
+	    User.UserBuilder userBuilder = User.builder()
+	            .firstName(firstName)
+	            .lastName(lastName)
+	            .phone(phone);
+
+	    List<Emails> emailsList = new ArrayList<>();
+
+	    // Check for email and create email entity only if it's not null or blank
+	    if (email != null && !email.trim().isEmpty()) {
+	        Emails emailEntity = Emails.builder()
+	                .email(email)
+	                .isPrimary(true)
+	                .build();
+	        emailsList.add(emailEntity);
+	        emailEntity.setUser(null); // will be set after user is built
+	    }
+
+	    User user = userBuilder.emails(emailsList.isEmpty() ? null : emailsList).build();
+
+	    // Set bidirectional mappings
+	    phone.setUser(user);
+	    emailsList.forEach(e -> e.setUser(user));
+
+	    // Generate tokens
+	    String accessToken = UUID.randomUUID().toString();
+	    String refreshTokenValue = UUID.randomUUID().toString();
+
+	    RefreshTokens refreshToken = RefreshTokens.builder()
+	            .token(refreshTokenValue)
+	            .expiresAt(LocalDateTime.now().plusDays(30))
+	            .revoked(false)
+	            .user(user)
+	            .build();
+
+	    user.setRefreshTokens(List.of(refreshToken));
+
+	    // Save to DB
+	    userRepository.save(user);
+
+	    // Remove from cache
+	    otpInMemoryCache.remove("register-session:" + tempToken);
+
+	    Map<String, String> tokenMap = new HashMap<>();
+	    tokenMap.put("accessToken", accessToken);
+	    tokenMap.put("refreshToken", refreshTokenValue);
+
+	    return new AuthResponse(true, "User registered successfully", tokenMap);
 	}
 
 }
