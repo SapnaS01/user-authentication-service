@@ -7,7 +7,6 @@ import org.springframework.web.bind.annotation.*;
 
 import com.self.userauth.pojo.AuthResponse;
 import com.self.userauth.pojo.RegistrationRequest;
-import com.self.userauth.pojo.RegistrationRequest;
 import com.self.userauth.pojo.SignUpRequest;
 import com.self.userauth.pojo.VerifyOtpRequest;
 import com.self.userauth.service.inter.AuthServiceInter;

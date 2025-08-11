@@ -7,6 +7,7 @@ import jakarta.persistence.Table;
 import lombok.*;
 import org.hibernate.annotations.*;
 
+import java.util.ArrayList;
 import java.util.List;
 
 @Entity
@@ -42,4 +43,14 @@ public class User extends BaseEntity {
 	protected String getPrefix() {
 		return "users";
 	}
+	
+	// Add helper method in User entity
+	public void addRefreshToken(RefreshTokens token) {
+	    if (this.refreshTokens == null) {
+	        this.refreshTokens = new ArrayList<>();
+	    }
+	    this.refreshTokens.add(token);
+	    token.setUser(this);
+	}
+
 }

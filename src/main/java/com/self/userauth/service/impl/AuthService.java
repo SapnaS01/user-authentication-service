@@ -5,7 +5,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 import org.springframework.stereotype.Service;
@@ -23,8 +22,12 @@ import com.self.userauth.repository.PhonesRepository;
 import com.self.userauth.repository.UserRepository;
 import com.self.userauth.service.inter.AuthServiceInter;
 
+import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
+
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AuthService implements AuthServiceInter {
@@ -34,11 +37,14 @@ public class AuthService implements AuthServiceInter {
 	private final OtpCacheRepository otpCacheRepository;
 	private final UserRepository userRepository;
 	private final Map<String, Map<String, Object>> otpInMemoryCache = new ConcurrentHashMap<>();
+	private final JwtService jwtService;
 
 
 	@Override
 	public AuthResponse signUp(String phone) {
+		log.info("Sign-up request received for phone: {}", maskPhone(phone));
 		if (phonesRepository.existsByPhone(phone)) {
+			log.warn("Sign-up failed: phone {} already registered", maskPhone(phone));
 			throw new BadRequestException("User already registered with this phone number");
 		}
 		String otp = otpService.generateOtp();
@@ -61,13 +67,18 @@ public class AuthService implements AuthServiceInter {
 		otpData.put("expiresAt", expiresAt);
 		otpInMemoryCache.put("otp:register:" + phone, otpData);
 
+		log.info("OTP generated for phone {} and expires at {}", maskPhone(phone), expiresAt);
+
+
 		return new AuthResponse(true, "OTP sent successfully", null);
 	}
 
 	@Override
 	public AuthResponse verifyOtp(String phone,String otp) {
+		log.info("OTP verification attempt for phone {}", maskPhone(phone));
 		Map<String, Object> otpData = otpInMemoryCache.get("otp:register:" + phone);
 		if (otpData == null) {
+			log.warn("OTP verification failed: No OTP found for phone {}", maskPhone(phone));
 			throw new BadRequestException("OTP not found or expired");
 		}
 		String cachedOtp = (String) otpData.get("otp");
@@ -75,10 +86,12 @@ public class AuthService implements AuthServiceInter {
 
 		if (LocalDateTime.now().isAfter(expiresAt)) {
 			otpInMemoryCache.remove("otp:register:" + phone);
+			log.warn("OTP expired for phone {}", maskPhone(phone));
 			throw new BadRequestException("OTP has expired");
 		}
 
 		if (!cachedOtp.equals(otp)) {
+			log.warn("Invalid OTP entered for phone {}", maskPhone(phone));
 			throw new BadRequestException("Invalid OTP");
 		}
 
@@ -89,82 +102,96 @@ public class AuthService implements AuthServiceInter {
 		// Generate temporary token
 		String tempToken = java.util.UUID.randomUUID().toString();
 
-		//		save the phone number as verified in the cache for future reference
+		//		save the phone number as verified in the cache for future 
 		Map<String, Object> verifiedData = new HashMap<>();
 		verifiedData.put("phone", phone);
 		verifiedData.put("isVerified", true);
 		verifiedData.put("verifiedAt", LocalDateTime.now());  
 
 		otpInMemoryCache.put("register-session:" + tempToken, verifiedData);
+		log.info("OTP verified successfully for phone {}. Temp token generated.", maskPhone(phone));
 
 		return new AuthResponse(true, "OTP verified successfully", tempToken);
 
 	}
 
+
+
+	/**
+	 * @Transactional: multi-step DB operations
+	 * If we don’t use @Transactional here, the entity becomes detached after save(), 
+	 * and Hibernate will not track new refresh tokens unless we explicitly merge or save again.
+	 * */
+	@Transactional
 	@Override
 	public AuthResponse completeRegistration(String firstName, String lastName, String email, String tempToken) {
-	    Map<String, Object> verifiedData = otpInMemoryCache.get("register-session:" + tempToken);
+		log.info("Completing registration for tempToken {}", tempToken);
+		Map<String, Object> verifiedData = otpInMemoryCache.get("register-session:" + tempToken);
+		if (verifiedData == null || !(Boolean) verifiedData.getOrDefault("isVerified", false)) {
+			log.warn("Registration failed: Invalid or expired tempToken {}", tempToken);
+			throw new BadRequestException("Phone number not verified or session expired");
+		}
 
-	    if (verifiedData == null || !(Boolean) verifiedData.getOrDefault("isVerified", false)) {
-	        throw new BadRequestException("Phone number not verified or session expired");
-	    }
+		String phoneNumber = (String) verifiedData.get("phone");
 
-	    String phoneNumber = (String) verifiedData.get("phone");
+		Phones phone = Phones.builder()
+				.phone(phoneNumber)
+				.isPrimary(true)
+				.build();
 
-	    // Create phone entity
-	    Phones phone = Phones.builder()
-	            .phone(phoneNumber)
-	            .isPrimary(true)
-	            .build();
+		User user = User.builder()
+				.firstName(firstName)
+				.lastName(lastName)
+				.phone(phone)
+				.build();
 
-	    // Create user
-	    User.UserBuilder userBuilder = User.builder()
-	            .firstName(firstName)
-	            .lastName(lastName)
-	            .phone(phone);
+		phone.setUser(user);
 
-	    List<Emails> emailsList = new ArrayList<>();
+		if (email != null && !email.trim().isEmpty()) {
+			Emails emailEntity = Emails.builder()
+					.email(email)
+					.isPrimary(true)
+					.user(user)
+					.build();
+			//	        user.setEmails(List.of(emailEntity));  //List.of will create an immutable list 
+			List<Emails> emailList = new ArrayList<>();
+			emailList.add(emailEntity);
+			user.setEmails(emailList);
 
-	    // Check for email and create email entity only if it's not null or blank
-	    if (email != null && !email.trim().isEmpty()) {
-	        Emails emailEntity = Emails.builder()
-	                .email(email)
-	                .isPrimary(true)
-	                .build();
-	        emailsList.add(emailEntity);
-	        emailEntity.setUser(null); // will be set after user is built
-	    }
+		}
 
-	    User user = userBuilder.emails(emailsList.isEmpty() ? null : emailsList).build();
+		// persist user to get ID 
+		userRepository.save(user);  
 
-	    // Set bidirectional mappings
-	    phone.setUser(user);
-	    emailsList.forEach(e -> e.setUser(user));
+		String accessToken = jwtService.generateAccessToken(user);
+		String refreshTokenValue = jwtService.generateRefreshToken(user);
 
-	    // Generate tokens
-	    String accessToken = UUID.randomUUID().toString();
-	    String refreshTokenValue = UUID.randomUUID().toString();
+		//add the refresh token
+		RefreshTokens refreshToken = RefreshTokens.builder()
+				.token(refreshTokenValue)
+				.expiresAt(LocalDateTime.now().plusDays(30))
+				.revoked(false)
+				.user(user)
+				.build();
 
-	    RefreshTokens refreshToken = RefreshTokens.builder()
-	            .token(refreshTokenValue)
-	            .expiresAt(LocalDateTime.now().plusDays(30))
-	            .revoked(false)
-	            .user(user)
-	            .build();
+		// Save again ( persist refresh token)
+		user.addRefreshToken(refreshToken);
+		//	    userRepository.save(user);  // no need as we used transactional 
 
-	    user.setRefreshTokens(List.of(refreshToken));
+		otpInMemoryCache.remove("register-session:" + tempToken);
 
-	    // Save to DB
-	    userRepository.save(user);
+		Map<String, String> tokenMap = new HashMap<>();
+		tokenMap.put("accessToken", accessToken);
+		tokenMap.put("refreshToken", refreshTokenValue);
+		log.info("User registered successfully with phone {}", maskPhone(phoneNumber));
 
-	    // Remove from cache
-	    otpInMemoryCache.remove("register-session:" + tempToken);
-
-	    Map<String, String> tokenMap = new HashMap<>();
-	    tokenMap.put("accessToken", accessToken);
-	    tokenMap.put("refreshToken", refreshTokenValue);
-
-	    return new AuthResponse(true, "User registered successfully", tokenMap);
+		return new AuthResponse(true, "User registered successfully", tokenMap);
 	}
+
+	private String maskPhone(String phone) {
+		if (phone == null || phone.length() < 4) return "****";
+		return "****" + phone.substring(phone.length() - 4);
+	}
+
 
 }
