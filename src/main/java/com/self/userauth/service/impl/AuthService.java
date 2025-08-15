@@ -32,6 +32,10 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class AuthService implements AuthServiceInter {
 
+	private static final String OTP_LOGIN = "otp:login:";
+	private static final String REGISTER_SESSION = "register-session:";
+	private static final String OTP_REGISTER = "otp:register:";
+
 	private final PhonesRepository phonesRepository;
 	private final OtpService otpService;
 	private final OtpCacheRepository otpCacheRepository;
@@ -65,7 +69,7 @@ public class AuthService implements AuthServiceInter {
 		Map<String, Object> otpData = new HashMap<>();
 		otpData.put("otp", otp);
 		otpData.put("expiresAt", expiresAt);
-		otpInMemoryCache.put("otp:register:" + phone, otpData);
+		otpInMemoryCache.put(OTP_REGISTER + phone, otpData);
 
 		log.info("OTP generated for phone {} and expires at {}", maskPhone(phone), expiresAt);
 
@@ -76,7 +80,7 @@ public class AuthService implements AuthServiceInter {
 	@Override
 	public AuthResponse verifyOtp(String phone,String otp) {
 		log.info("OTP verification attempt for phone {}", maskPhone(phone));
-		Map<String, Object> otpData = otpInMemoryCache.get("otp:register:" + phone);
+		Map<String, Object> otpData = otpInMemoryCache.get(OTP_REGISTER + phone);
 		if (otpData == null) {
 			log.warn("OTP verification failed: No OTP found for phone {}", maskPhone(phone));
 			throw new BadRequestException("OTP not found or expired");
@@ -85,7 +89,7 @@ public class AuthService implements AuthServiceInter {
 		LocalDateTime expiresAt = (LocalDateTime) otpData.get("expiresAt");
 
 		if (LocalDateTime.now().isAfter(expiresAt)) {
-			otpInMemoryCache.remove("otp:register:" + phone);
+			otpInMemoryCache.remove(OTP_REGISTER + phone);
 			log.warn("OTP expired for phone {}", maskPhone(phone));
 			throw new BadRequestException("OTP has expired");
 		}
@@ -97,7 +101,7 @@ public class AuthService implements AuthServiceInter {
 
 
 		// Remove OTP after verification
-		otpInMemoryCache.remove("otp:register:" + phone);
+		otpInMemoryCache.remove(OTP_REGISTER + phone);
 
 		// Generate temporary token
 		String tempToken = java.util.UUID.randomUUID().toString();
@@ -108,7 +112,7 @@ public class AuthService implements AuthServiceInter {
 		verifiedData.put("isVerified", true);
 		verifiedData.put("verifiedAt", LocalDateTime.now());  
 
-		otpInMemoryCache.put("register-session:" + tempToken, verifiedData);
+		otpInMemoryCache.put(REGISTER_SESSION + tempToken, verifiedData);
 		log.info("OTP verified successfully for phone {}. Temp token generated.", maskPhone(phone));
 
 		return new AuthResponse(true, "OTP verified successfully", tempToken);
@@ -126,7 +130,7 @@ public class AuthService implements AuthServiceInter {
 	@Override
 	public AuthResponse completeRegistration(String firstName, String lastName, String email, String tempToken) {
 		log.info("Completing registration for tempToken {}", tempToken);
-		Map<String, Object> verifiedData = otpInMemoryCache.get("register-session:" + tempToken);
+		Map<String, Object> verifiedData = otpInMemoryCache.get(REGISTER_SESSION + tempToken);
 		if (verifiedData == null || !(Boolean) verifiedData.getOrDefault("isVerified", false)) {
 			log.warn("Registration failed: Invalid or expired tempToken {}", tempToken);
 			throw new BadRequestException("Phone number not verified or session expired");
@@ -178,7 +182,7 @@ public class AuthService implements AuthServiceInter {
 		user.addRefreshToken(refreshToken);
 		//	    userRepository.save(user);  // no need as we used transactional 
 
-		otpInMemoryCache.remove("register-session:" + tempToken);
+		otpInMemoryCache.remove(REGISTER_SESSION + tempToken);
 
 		Map<String, String> tokenMap = new HashMap<>();
 		tokenMap.put("accessToken", accessToken);
@@ -191,6 +195,98 @@ public class AuthService implements AuthServiceInter {
 	private String maskPhone(String phone) {
 		if (phone == null || phone.length() < 4) return "****";
 		return "****" + phone.substring(phone.length() - 4);
+	}
+
+	@Override
+	public AuthResponse login(String phone) {
+		log.info("Login attempt for phone {}", maskPhone(phone));
+		// check if phone exists
+		if (!phonesRepository.existsByPhone(phone)) {
+			log.warn("Login failed: phone {} not registered", maskPhone(phone));
+			throw new BadRequestException("User not registered with this phone number");
+		}
+		// Generate OTP for login
+		String otp = otpService.generateOtp();
+
+		// TODO: otpService.sendOtp(phone, otp);
+
+		LocalDateTime expiresAt = LocalDateTime.now().plusMinutes(5);
+		OtpCache otpCache = OtpCache.builder()
+				.phone(phone)
+				.otp(otp)
+				.action(OtpAction.LOGIN)
+				.expiresAt(expiresAt)
+				.build();
+
+		otpCacheRepository.save(otpCache);
+
+
+		Map<String, Object> otpData = new HashMap<>();
+		otpData.put("otp", otp);
+		otpData.put("expiresAt", expiresAt);
+		otpInMemoryCache.put(OTP_LOGIN + phone, otpData);
+
+		log.info("OTP generated for phone {} and expires at {}", maskPhone(phone), expiresAt);
+
+
+		return new AuthResponse(true, "OTP sent successfully", null);
+
+	}
+
+	@Override
+	public AuthResponse verifyLoginOtp(String phone, String otp) {
+		log.info("OTP verification attempt for phone {}", maskPhone(phone));
+		Map<String, Object> otpData = otpInMemoryCache.get(OTP_LOGIN + phone);
+		if (otpData == null) {
+			log.warn("OTP verification failed: No OTP found for phone {}", maskPhone(phone));
+			throw new BadRequestException("OTP not found or expired");
+		}
+		String cachedOtp = (String) otpData.get("otp");
+		LocalDateTime expiresAt = (LocalDateTime) otpData.get("expiresAt");
+
+		if (LocalDateTime.now().isAfter(expiresAt)) {
+			otpInMemoryCache.remove(OTP_LOGIN + phone);
+			log.warn("OTP expired for phone {}", maskPhone(phone));
+			throw new BadRequestException("OTP has expired");
+		}
+
+		if (!cachedOtp.equals(otp)) {
+			log.warn("Invalid OTP entered for phone {}", maskPhone(phone));
+			throw new BadRequestException("Invalid OTP");
+		}
+
+
+		// remove OTP after verification
+		otpInMemoryCache.remove(OTP_LOGIN + phone);
+
+		//  fetch user via Optional, no null checks needed
+		User user = phonesRepository.findByPhone(phone)
+				.map(Phones::getUser) // Extract User from Phones (method reference)
+				.orElseThrow(() -> new BadRequestException("User not found for given phone"));
+
+		// generate tokens
+		String accessToken = jwtService.generateAccessToken(user);
+		String refreshTokenValue = jwtService.generateRefreshToken(user);
+
+		// build and attach refresh token
+		RefreshTokens refreshToken = RefreshTokens.builder()
+				.token(refreshTokenValue)
+				.expiresAt(LocalDateTime.now().plusDays(30))
+				.revoked(false)
+				.user(user)
+				.build();
+
+		user.addRefreshToken(refreshToken);
+		userRepository.save(user);
+		log.info("Login successful for phone {}. Tokens generated.", maskPhone(phone));
+
+		Map<String, String> tokenMap = new HashMap<>();
+		tokenMap.put("accessToken", accessToken);
+		tokenMap.put("refreshToken", refreshTokenValue);
+
+		return new AuthResponse(true, "Login successful", tokenMap);
+
+
 	}
 
 

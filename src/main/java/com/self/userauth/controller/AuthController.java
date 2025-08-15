@@ -6,6 +6,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import com.self.userauth.pojo.AuthResponse;
+import com.self.userauth.pojo.LoginRequest;
 import com.self.userauth.pojo.RegistrationRequest;
 import com.self.userauth.pojo.SignUpRequest;
 import com.self.userauth.pojo.VerifyOtpRequest;
@@ -49,5 +50,27 @@ public class AuthController {
 				.header("X-Access-Token", accessToken)
 				.header("X-Refresh-Token", refreshToken)
 				.body(new AuthResponse(true, "User registered successfully", null)); 
+	}
+
+
+	@PostMapping("/login")
+	public ResponseEntity<AuthResponse> login(@RequestBody @Valid LoginRequest loginRequest) {
+		AuthResponse response = authService.login(loginRequest.getPhone());
+		return ResponseEntity.ok(response);
+	}
+
+	@PostMapping("/verify-login-otp")
+	public ResponseEntity<AuthResponse> verifyLoginOtp(@RequestBody @Valid VerifyOtpRequest verifyOtpRequest) {
+		AuthResponse response = authService.verifyLoginOtp(verifyOtpRequest.getPhone(), verifyOtpRequest.getOtp());
+
+		@SuppressWarnings("unchecked")
+		Map<String, String> meta = (Map<String, String>) response.getData();
+		String accessToken = meta.get("accessToken");
+		String refreshToken = meta.get("refreshToken");
+
+		return ResponseEntity.ok()
+				.header("X-Access-Token", accessToken)
+				.header("X-Refresh-Token", refreshToken)
+				.body(new AuthResponse(true, "Login successful", null));
 	}
 }

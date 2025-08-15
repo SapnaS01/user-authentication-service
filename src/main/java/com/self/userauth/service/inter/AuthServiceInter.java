@@ -7,5 +7,7 @@ public interface AuthServiceInter {
 	AuthResponse signUp(String phone);
 	AuthResponse verifyOtp(String phone,String otp);
 	AuthResponse completeRegistration(String firstName,String lastName, String email,String tempToken);
+	AuthResponse login(String phone);
+	AuthResponse verifyLoginOtp(String phone, String otp);
 
 }
