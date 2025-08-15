@@ -22,11 +22,6 @@ databaseChangeLog:
                   name: profile_image
                   type: VARCHAR(512)
               - column:
-                  name: is_verified
-                  type: BOOLEAN
-                  constraints:
-                    nullable: false
-              - column:
                   name: created_at
                   type: DATETIME(6)
                   constraints:
@@ -136,7 +131,7 @@ databaseChangeLog:
             columns:
               - column:
                   name: id
-                  type: VARCHAR(50)
+                  type: VARCHAR(100)
                   constraints:
                     primaryKey: true
                     nullable: false

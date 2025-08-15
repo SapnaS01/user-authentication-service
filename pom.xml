@@ -83,13 +83,24 @@
 			<artifactId>twilio</artifactId>
 			<version>10.9.0</version>
 		</dependency>
-		<!-- JJWT: Java JWT Library -->
+		<!-- JJWT for Java 17+ -->
 		<dependency>
-			<groupId>io.jsonwebtoken</groupId>
-			<artifactId>jjwt</artifactId>
-			<version>0.9.1</version>
+    		<groupId>io.jsonwebtoken</groupId>
+    		<artifactId>jjwt-api</artifactId>
+    		<version>0.11.5</version>
 		</dependency>
-
+		<dependency>
+    		<groupId>io.jsonwebtoken</groupId>
+    		<artifactId>jjwt-impl</artifactId>
+    		<version>0.11.5</version>
+    		<scope>runtime</scope>
+		</dependency>
+		<dependency>
+    		<groupId>io.jsonwebtoken</groupId>
+    		<artifactId>jjwt-jackson</artifactId>
+    		<version>0.11.5</version> <!-- for JSON serialization -->
+    		<scope>runtime</scope>
+		</dependency>
 
 		<dependency>
 			<groupId>com.mysql</groupId>

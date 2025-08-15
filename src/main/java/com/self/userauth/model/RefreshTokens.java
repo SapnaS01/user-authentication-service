@@ -17,16 +17,15 @@ import java.util.UUID;
 public class RefreshTokens {
 
 	@Id
-	@GeneratedValue(strategy = GenerationType.UUID)
-	@Column(name = "id", columnDefinition = "BINARY(16)", updatable = false, nullable = false)
-	private UUID id;
+	@Column(name = "id", nullable = false, updatable = false, unique = true,length = 100)
+	private String id;
 
 	@Column(name = "token", nullable = false, unique = true, length = 512)
 	private String token;
 
-//    This means:
-//       A user can have many refresh tokens (one per device or session).
-//       A refresh token belongs to one user.
+	//    This means:
+	//       A user can have many refresh tokens (one per device or session).
+	//       A refresh token belongs to one user.
 	@ManyToOne(fetch = FetchType.LAZY, optional = false)
 	@JoinColumn(name = "user_id", nullable = false)
 	private User user;
@@ -48,5 +47,13 @@ public class RefreshTokens {
 
 	public boolean isActive() {
 		return !revoked && !isExpired();
+	}
+
+	@PrePersist
+	protected void onCreate() {
+		if (this.id == null || this.id.isBlank()) {
+			String prefix = "refresh_tokens";
+			this.id = prefix + "_" + UUID.randomUUID();
+		}
 	}
 }
