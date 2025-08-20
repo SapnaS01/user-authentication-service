@@ -69,6 +69,7 @@ public class AuthService implements AuthServiceInter {
 		Map<String, Object> otpData = new HashMap<>();
 		otpData.put("otp", otp);
 		otpData.put("expiresAt", expiresAt);
+//		TODO: add caching mechanism
 		otpInMemoryCache.put(OTP_REGISTER + phone, otpData);
 
 		log.info("OTP generated for phone {} and expires at {}", maskPhone(phone), expiresAt);
@@ -285,7 +286,6 @@ public class AuthService implements AuthServiceInter {
 		tokenMap.put("refreshToken", refreshTokenValue);
 
 		return new AuthResponse(true, "Login successful", tokenMap);
-
 
 	}
 
