@@ -4,6 +4,8 @@ import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+
 import java.time.LocalDateTime;
 import java.util.UUID;
 
@@ -28,6 +30,7 @@ public class RefreshTokens {
 	//       A refresh token belongs to one user.
 	@ManyToOne(fetch = FetchType.LAZY, optional = false)
 	@JoinColumn(name = "user_id", nullable = false)
+	@JsonIgnore  // Avoid infinite recursion
 	private User user;
 
 	@Column(name = "expires_at", nullable = false)

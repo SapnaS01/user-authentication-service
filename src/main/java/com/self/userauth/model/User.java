@@ -1,5 +1,6 @@
 package com.self.userauth.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.self.userauth.model.common.BaseEntity;
 import jakarta.persistence.*;
 import jakarta.persistence.CascadeType;
@@ -37,6 +38,7 @@ public class User extends BaseEntity {
 	private List<Emails> emails;
 
 	@OneToMany(mappedBy = "user", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+	@JsonIgnore  // Prevent returning refresh tokens in JSON while fetching from db
 	private List<RefreshTokens> refreshTokens;
 
 	@Override
