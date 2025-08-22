@@ -1,5 +1,6 @@
 package com.self.userauth.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.self.userauth.model.common.BaseEntity;
 
 import jakarta.persistence.Column;
@@ -31,6 +32,7 @@ public class Phones extends BaseEntity {
 
 	@OneToOne(fetch = FetchType.LAZY)
 	@JoinColumn(name = "user_id", nullable = false, unique = true)
+	@JsonIgnore  // Avoid infinite recursion
 	private User user;
 
 	@Override
