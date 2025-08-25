@@ -2,9 +2,13 @@ package com.self.userauth.controller;
 
 import java.util.Map;
 
+import org.modelmapper.ModelMapper;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
+import com.self.userauth.dto.LoginDto;
+import com.self.userauth.dto.RegistrationDto;
+import com.self.userauth.dto.SignUpDto;
+import com.self.userauth.dto.VerifyOtpDto;
 import com.self.userauth.pojo.AuthResponse;
 import com.self.userauth.pojo.LoginRequest;
 import com.self.userauth.pojo.RegistrationRequest;
@@ -21,16 +25,19 @@ import lombok.RequiredArgsConstructor;
 public class AuthController {
 
 	private final AuthServiceInter authService;
+	private final ModelMapper modelMapper;
 
 	@PostMapping("/signup")
 	public ResponseEntity<AuthResponse> signUp(@RequestBody @Valid SignUpRequest signUpRequest) {
-		AuthResponse response = authService.signUp(signUpRequest.getPhone());
+		SignUpDto dto = modelMapper.map(signUpRequest, SignUpDto.class);
+		AuthResponse response = authService.signUp(dto);
 		return ResponseEntity.ok(response);
 	}
 
 	@PostMapping("/verify-otp")
 	public ResponseEntity<AuthResponse> verifyOtp( @RequestBody @Valid VerifyOtpRequest verifyOtpRequest) {
-		AuthResponse response = authService.verifyOtp(verifyOtpRequest.getPhone(), verifyOtpRequest.getOtp());
+		VerifyOtpDto dto = modelMapper.map(verifyOtpRequest, VerifyOtpDto.class);
+		AuthResponse response = authService.verifyOtp(dto);
 		return ResponseEntity.ok(response);
 	}
 
@@ -39,7 +46,9 @@ public class AuthController {
 			@RequestHeader("X-Temp-Token") String tempToken,
 			@RequestBody @Valid RegistrationRequest registrationRequest) {
 
-		AuthResponse response = authService.completeRegistration(registrationRequest.getFirstName(), registrationRequest.getLastName(),registrationRequest.getEmail(), tempToken);
+		RegistrationDto dto = modelMapper.map(registrationRequest, RegistrationDto.class);
+		dto.setTempToken(tempToken); 
+		AuthResponse response = authService.completeRegistration(dto);
 
 		@SuppressWarnings("unchecked")
 		Map<String, String> meta = (Map<String, String>) response.getData();
@@ -55,13 +64,15 @@ public class AuthController {
 
 	@PostMapping("/login")
 	public ResponseEntity<AuthResponse> login(@RequestBody @Valid LoginRequest loginRequest) {
-		AuthResponse response = authService.login(loginRequest.getPhone());
+		LoginDto dto = modelMapper.map(loginRequest, LoginDto.class);
+		AuthResponse response = authService.login(dto);
 		return ResponseEntity.ok(response);
 	}
 
 	@PostMapping("/verify-login-otp")
 	public ResponseEntity<AuthResponse> verifyLoginOtp(@RequestBody @Valid VerifyOtpRequest verifyOtpRequest) {
-		AuthResponse response = authService.verifyLoginOtp(verifyOtpRequest.getPhone(), verifyOtpRequest.getOtp());
+		VerifyOtpDto dto = modelMapper.map(verifyOtpRequest, VerifyOtpDto.class);
+		AuthResponse response = authService.verifyLoginOtp(dto);
 
 		@SuppressWarnings("unchecked")
 		Map<String, String> meta = (Map<String, String>) response.getData();
