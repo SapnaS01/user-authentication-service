@@ -5,10 +5,13 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 import org.springframework.stereotype.Service;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.self.userauth.exception.BadRequestException;
 import com.self.userauth.model.Emails;
 import com.self.userauth.model.OtpCache;
@@ -17,10 +20,12 @@ import com.self.userauth.model.RefreshTokens;
 import com.self.userauth.model.User;
 import com.self.userauth.model.enums.OtpAction;
 import com.self.userauth.pojo.AuthResponse;
+import com.self.userauth.pojo.OtpData;
 import com.self.userauth.repository.OtpCacheRepository;
 import com.self.userauth.repository.PhonesRepository;
 import com.self.userauth.repository.UserRepository;
 import com.self.userauth.service.inter.AuthServiceInter;
+import com.self.userauth.util.RedisHelper;
 
 import jakarta.transaction.Transactional;
 import lombok.RequiredArgsConstructor;
@@ -40,6 +45,10 @@ public class AuthService implements AuthServiceInter {
 	private final OtpService otpService;
 	private final OtpCacheRepository otpCacheRepository;
 	private final UserRepository userRepository;
+	private final RedisHelper redisHelper;
+	private final ObjectMapper objectMapper;
+
+	//	in-memory on a single JVM.
 	private final Map<String, Map<String, Object>> otpInMemoryCache = new ConcurrentHashMap<>();
 	private final JwtService jwtService;
 
@@ -66,59 +75,64 @@ public class AuthService implements AuthServiceInter {
 		otpCacheRepository.save(otpCache);
 
 
-		Map<String, Object> otpData = new HashMap<>();
-		otpData.put("otp", otp);
-		otpData.put("expiresAt", expiresAt);
-//		TODO: add caching mechanism
-		otpInMemoryCache.put(OTP_REGISTER + phone, otpData);
+		//		Map<String, Object> otpData = new HashMap<>();
+		//		otpData.put("otp", otp);
+		//		otpData.put("expiresAt", expiresAt);
+
+		//		otpInMemoryCache.put(OTP_REGISTER + phone, otpData);	
+		redisHelper.setWithTtl(OTP_REGISTER + phone, new OtpData(otp, expiresAt), 5, TimeUnit.MINUTES);
 
 		log.info("OTP generated for phone {} and expires at {}", maskPhone(phone), expiresAt);
-
 
 		return new AuthResponse(true, "OTP sent successfully", null);
 	}
 
 	@Override
-	public AuthResponse verifyOtp(String phone,String otp) {
+	public AuthResponse verifyOtp(String phone, String otp) {
 		log.info("OTP verification attempt for phone {}", maskPhone(phone));
-		Map<String, Object> otpData = otpInMemoryCache.get(OTP_REGISTER + phone);
+		//		Map<String, Object> otpData = otpInMemoryCache.get(OTP_REGISTER + phone);
+		//		if (otpData == null) {
+		//			log.warn("OTP verification failed: No OTP found for phone {}", maskPhone(phone));
+		//			throw new BadRequestException("OTP not found or expired");
+		//		}
+		//		String cachedOtp = (String) otpData.get("otp");
+		//		LocalDateTime expiresAt = (LocalDateTime) otpData.get("expiresAt");
+
+		// Fetch OTP data from Redis
+		OtpData otpData = redisHelper.get(OTP_REGISTER + phone, OtpData.class);
 		if (otpData == null) {
-			log.warn("OTP verification failed: No OTP found for phone {}", maskPhone(phone));
 			throw new BadRequestException("OTP not found or expired");
 		}
-		String cachedOtp = (String) otpData.get("otp");
-		LocalDateTime expiresAt = (LocalDateTime) otpData.get("expiresAt");
 
-		if (LocalDateTime.now().isAfter(expiresAt)) {
-			otpInMemoryCache.remove(OTP_REGISTER + phone);
-			log.warn("OTP expired for phone {}", maskPhone(phone));
+		// Expiration check
+		if (LocalDateTime.now().isAfter(otpData.getExpiresAt())) {
+			redisHelper.delete(OTP_REGISTER + phone);
 			throw new BadRequestException("OTP has expired");
 		}
 
-		if (!cachedOtp.equals(otp)) {
-			log.warn("Invalid OTP entered for phone {}", maskPhone(phone));
+		// Validate OTP
+		if (!otpData.getOtp().equals(otp)) {
 			throw new BadRequestException("Invalid OTP");
 		}
 
+		// Remove OTP after successful verification
+		redisHelper.delete(OTP_REGISTER + phone);
 
-		// Remove OTP after verification
-		otpInMemoryCache.remove(OTP_REGISTER + phone);
+		// Generate temp token
+		String tempToken = UUID.randomUUID().toString();
 
-		// Generate temporary token
-		String tempToken = java.util.UUID.randomUUID().toString();
-
-		//		save the phone number as verified in the cache for future 
+		// Store verification info with TTL
 		Map<String, Object> verifiedData = new HashMap<>();
 		verifiedData.put("phone", phone);
 		verifiedData.put("isVerified", true);
-		verifiedData.put("verifiedAt", LocalDateTime.now());  
+		verifiedData.put("verifiedAt", LocalDateTime.now());
 
-		otpInMemoryCache.put(REGISTER_SESSION + tempToken, verifiedData);
-		log.info("OTP verified successfully for phone {}. Temp token generated.", maskPhone(phone));
+		redisHelper.setWithTtl(REGISTER_SESSION + tempToken, verifiedData, 5, TimeUnit.MINUTES);
 
 		return new AuthResponse(true, "OTP verified successfully", tempToken);
-
 	}
+
+
 
 
 
@@ -131,7 +145,13 @@ public class AuthService implements AuthServiceInter {
 	@Override
 	public AuthResponse completeRegistration(String firstName, String lastName, String email, String tempToken) {
 		log.info("Completing registration for tempToken {}", tempToken);
-		Map<String, Object> verifiedData = otpInMemoryCache.get(REGISTER_SESSION + tempToken);
+		//		Map<String, Object> verifiedData = otpInMemoryCache.get(REGISTER_SESSION + tempToken);
+		Object obj = redisHelper.get(REGISTER_SESSION + tempToken, Object.class);
+		Map<String, Object> verifiedData = objectMapper.convertValue(
+				obj,
+				new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}
+				);
+
 		if (verifiedData == null || !(Boolean) verifiedData.getOrDefault("isVerified", false)) {
 			log.warn("Registration failed: Invalid or expired tempToken {}", tempToken);
 			throw new BadRequestException("Phone number not verified or session expired");
@@ -183,7 +203,8 @@ public class AuthService implements AuthServiceInter {
 		user.addRefreshToken(refreshToken);
 		//	    userRepository.save(user);  // no need as we used transactional 
 
-		otpInMemoryCache.remove(REGISTER_SESSION + tempToken);
+		//		otpInMemoryCache.remove(REGISTER_SESSION + tempToken);
+		redisHelper.delete(REGISTER_SESSION + tempToken);
 
 		Map<String, String> tokenMap = new HashMap<>();
 		tokenMap.put("accessToken", accessToken);
@@ -222,10 +243,11 @@ public class AuthService implements AuthServiceInter {
 		otpCacheRepository.save(otpCache);
 
 
-		Map<String, Object> otpData = new HashMap<>();
-		otpData.put("otp", otp);
-		otpData.put("expiresAt", expiresAt);
-		otpInMemoryCache.put(OTP_LOGIN + phone, otpData);
+		//		Map<String, Object> otpData = new HashMap<>();
+		//		otpData.put("otp", otp);
+		//		otpData.put("expiresAt", expiresAt);
+		//		otpInMemoryCache.put(OTP_LOGIN + phone, otpData);
+		redisHelper.setWithTtl(OTP_LOGIN + phone, new OtpData(otp, expiresAt), 5, TimeUnit.MINUTES);
 
 		log.info("OTP generated for phone {} and expires at {}", maskPhone(phone), expiresAt);
 
@@ -237,16 +259,18 @@ public class AuthService implements AuthServiceInter {
 	@Override
 	public AuthResponse verifyLoginOtp(String phone, String otp) {
 		log.info("OTP verification attempt for phone {}", maskPhone(phone));
-		Map<String, Object> otpData = otpInMemoryCache.get(OTP_LOGIN + phone);
+		//		Map<String, Object> otpData = otpInMemoryCache.get(OTP_LOGIN + phone);
+		OtpData otpData = redisHelper.get(OTP_LOGIN + phone, OtpData.class);
 		if (otpData == null) {
 			log.warn("OTP verification failed: No OTP found for phone {}", maskPhone(phone));
 			throw new BadRequestException("OTP not found or expired");
 		}
-		String cachedOtp = (String) otpData.get("otp");
-		LocalDateTime expiresAt = (LocalDateTime) otpData.get("expiresAt");
+		String cachedOtp = otpData.getOtp();
+		LocalDateTime expiresAt = otpData.getExpiresAt();
 
 		if (LocalDateTime.now().isAfter(expiresAt)) {
-			otpInMemoryCache.remove(OTP_LOGIN + phone);
+			//			otpInMemoryCache.remove(OTP_LOGIN + phone);
+			redisHelper.delete(OTP_LOGIN + phone);
 			log.warn("OTP expired for phone {}", maskPhone(phone));
 			throw new BadRequestException("OTP has expired");
 		}
@@ -258,7 +282,8 @@ public class AuthService implements AuthServiceInter {
 
 
 		// remove OTP after verification
-		otpInMemoryCache.remove(OTP_LOGIN + phone);
+		//		otpInMemoryCache.remove(OTP_LOGIN + phone);
+		redisHelper.delete(OTP_LOGIN + phone);
 
 		//  fetch user via Optional, no null checks needed
 		User user = phonesRepository.findByPhone(phone)
