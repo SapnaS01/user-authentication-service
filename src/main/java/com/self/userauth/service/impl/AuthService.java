@@ -145,78 +145,83 @@ public class AuthService implements AuthServiceInter {
 	 * If we don’t use @Transactional here, the entity becomes detached after save(), 
 	 * and Hibernate will not track new refresh tokens unless we explicitly merge or save again.
 	 * */
+
 	@Transactional
 	@Override
 	public AuthResponse completeRegistration(RegistrationDto dto) {
-		log.info("Completing registration for tempToken {}", dto.getTempToken());
-		//		Map<String, Object> verifiedData = otpInMemoryCache.get(REGISTER_SESSION + tempToken);
-		Object obj = redisHelper.get(REGISTER_SESSION + dto.getTempToken(), Object.class);
-		Map<String, Object> verifiedData = objectMapper.convertValue(
-				obj,
-				new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}
-				);
+	    log.info("Completing registration for tempToken {}", dto.getTempToken());
 
-		if (verifiedData == null || !(Boolean) verifiedData.getOrDefault("isVerified", false)) {
-			log.warn("Registration failed: Invalid or expired tempToken {}", dto.getTempToken());
-			throw new BadRequestException("Phone number not verified or session expired");
-		}
+	    Object obj = redisHelper.get(REGISTER_SESSION + dto.getTempToken(), Object.class);
+	    Map<String, Object> verifiedData = objectMapper.convertValue(
+	            obj,
+	            new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {}
+	    );
 
-		String phoneNumber = (String) verifiedData.get("phone");
+	    if (verifiedData == null || !(Boolean) verifiedData.getOrDefault("isVerified", false)) {
+	        log.warn("Registration failed: Invalid or expired tempToken {}", dto.getTempToken());
+	        throw new BadRequestException("Phone number not verified or session expired");
+	    }
 
-		Phones phone = Phones.builder()
-				.phone(phoneNumber)
-				.isPrimary(true)
-				.build();
+	    String phoneNumber = (String) verifiedData.get("phone");
 
-		User user = User.builder()
-				.firstName(dto.getFirstName())
-				.lastName(dto.getLastName())
-				.phone(phone)
-				.build();
+	    Phones phone = Phones.builder()
+	            .phone(phoneNumber)
+	            .isPrimary(true)
+	            .build();
 
-		phone.setUser(user);
+	    User user = User.builder()
+	            .firstName(dto.getFirstName())
+	            .lastName(dto.getLastName())
+	            .phone(phone)
+	            .build();
+	    phone.setUser(user);
 
-		if (dto.getEmail() != null && !dto.getEmail().trim().isEmpty()) {
-			Emails emailEntity = Emails.builder()
-					.email(dto.getEmail())
-					.isPrimary(true)
-					.user(user)
-					.build();
-			//	        user.setEmails(List.of(emailEntity));  //List.of will create an immutable list 
-			List<Emails> emailList = new ArrayList<>();
-			emailList.add(emailEntity);
-			user.setEmails(emailList);
+	    if (dto.getEmail() != null && !dto.getEmail().trim().isEmpty()) {
+	        Emails emailEntity = Emails.builder()
+	                .email(dto.getEmail())
+	                .isPrimary(true)
+	                .user(user)
+	                .build();
+	        List<Emails> emailList = new ArrayList<>();
+	        emailList.add(emailEntity);
+	        user.setEmails(emailList);
+	    }
 
-		}
+	    // Persist user
+	    userRepository.save(user);
 
-		// persist user to get ID 
-		userRepository.save(user);  
+	    String accessToken = jwtService.generateAccessToken(user);
+	    String refreshTokenValue = jwtService.generateRefreshToken(user);
 
-		String accessToken = jwtService.generateAccessToken(user);
-		String refreshTokenValue = jwtService.generateRefreshToken(user);
+	    RefreshTokens refreshToken = RefreshTokens.builder()
+	            .token(refreshTokenValue)
+	            .expiresAt(LocalDateTime.now().plusDays(30))
+	            .revoked(false)
+	            .user(user)
+	            .build();
+	    user.addRefreshToken(refreshToken);
 
-		//add the refresh token
-		RefreshTokens refreshToken = RefreshTokens.builder()
-				.token(refreshTokenValue)
-				.expiresAt(LocalDateTime.now().plusDays(30))
-				.revoked(false)
-				.user(user)
-				.build();
+	    redisHelper.delete(REGISTER_SESSION + dto.getTempToken());
 
-		// Save again ( persist refresh token)
-		user.addRefreshToken(refreshToken);
-		//	    userRepository.save(user);  // no need as we used transactional 
+	    // Build response data
+	    Map<String, Object> responseData = new HashMap<>();
+	    Map<String, Object> userData = new HashMap<>();
+	    userData.put("id", user.getId());
+	    userData.put("phone", phoneNumber);
+	    userData.put("firstName", user.getFirstName());
+	    userData.put("lastName", user.getLastName());
+	    userData.put("email", dto.getEmail());
+	    responseData.put("tokens", Map.of(
+	            "accessToken", accessToken,
+	            "refreshToken", refreshTokenValue));
+	    
 
-		//		otpInMemoryCache.remove(REGISTER_SESSION + tempToken);
-		redisHelper.delete(REGISTER_SESSION + dto.getTempToken());
+	    responseData.put("user", userData);
 
-		Map<String, String> tokenMap = new HashMap<>();
-		tokenMap.put("accessToken", accessToken);
-		tokenMap.put("refreshToken", refreshTokenValue);
-		log.info("User registered successfully with phone {}", maskPhone(phoneNumber));
-
-		return new AuthResponse(true, "User registered successfully", tokenMap);
+	    log.info("User registered successfully with phone {}", maskPhone(phoneNumber));
+	    return new AuthResponse(true, "User registered successfully", responseData);
 	}
+
 
 	private String maskPhone(String phone) {
 		if (phone == null || phone.length() < 4) return "****";
@@ -309,12 +314,21 @@ public class AuthService implements AuthServiceInter {
 		user.addRefreshToken(refreshToken);
 		userRepository.save(user);
 		log.info("Login successful for phone {}. Tokens generated.", maskPhone(dto.getPhone()));
+		
+		 Map<String, Object> responseData = new HashMap<>();
+		    Map<String, Object> userData = new HashMap<>();
+		    userData.put("id", user.getId());
+		    userData.put("phone", user.getPhone().getPhone());
+		    userData.put("firstName", user.getFirstName());
+		    userData.put("lastName", user.getLastName());
+		    userData.put("email", user.getEmails().isEmpty() ? null : user.getEmails().get(0).getEmail());
+		    responseData.put("tokens", Map.of(
+		            "accessToken", accessToken,
+		            "refreshToken", refreshTokenValue));
+		    
 
-		Map<String, String> tokenMap = new HashMap<>();
-		tokenMap.put("accessToken", accessToken);
-		tokenMap.put("refreshToken", refreshTokenValue);
-
-		return new AuthResponse(true, "Login successful", tokenMap);
+		    responseData.put("user", userData);
+		    return new AuthResponse(true, "Login successful", responseData);
 
 	}
 

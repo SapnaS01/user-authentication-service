@@ -51,14 +51,18 @@ public class AuthController {
 		AuthResponse response = authService.completeRegistration(dto);
 
 		@SuppressWarnings("unchecked")
-		Map<String, String> meta = (Map<String, String>) response.getData();
-		String accessToken = meta.get("accessToken");
-		String refreshToken = meta.get("refreshToken");
+		Map<String, Object> meta = (Map<String, Object>) response.getData();
+
+		// Extract tokens map
+		@SuppressWarnings("unchecked")
+		Map<String, String> tokens = (Map<String, String>) meta.get("tokens");
+		String accessToken = tokens.get("accessToken");
+		String refreshToken = tokens.get("refreshToken");
 
 		return ResponseEntity.ok()
 				.header("X-Access-Token", accessToken)
 				.header("X-Refresh-Token", refreshToken)
-				.body(new AuthResponse(true, "User registered successfully", null)); 
+				.body(new AuthResponse(true, "User registered successfully", meta.get("user"))); 
 	}
 
 
@@ -75,13 +79,20 @@ public class AuthController {
 		AuthResponse response = authService.verifyLoginOtp(dto);
 
 		@SuppressWarnings("unchecked")
-		Map<String, String> meta = (Map<String, String>) response.getData();
-		String accessToken = meta.get("accessToken");
-		String refreshToken = meta.get("refreshToken");
+		Map<String, Object> meta = (Map<String, Object>) response.getData();
+		
+		// Extract tokens map
+		@SuppressWarnings("unchecked")
+		Map<String, String> tokens = (Map<String, String>) meta.get("tokens");
+
+		// Get individual tokens
+		String accessToken = tokens.get("accessToken");
+		String refreshToken = tokens.get("refreshToken");
+		System.out.println("Access Token: " + accessToken);
 
 		return ResponseEntity.ok()
 				.header("X-Access-Token", accessToken)
 				.header("X-Refresh-Token", refreshToken)
-				.body(new AuthResponse(true, "Login successful", null));
+				.body(new AuthResponse(true, "Login successful", meta.get("user")));
 	}
 }
