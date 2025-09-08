@@ -19,6 +19,6 @@ public interface UserServiceInter {
 	// Delete a user
 	void deleteUser(String userId);
 
-	// Get all users (for admin purposes) add pagination support 
+	// Get all users  
 	Page<UserDTO> getAllUsers(Pageable pageable);
 }
