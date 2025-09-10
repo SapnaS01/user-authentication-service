@@ -1,9 +1,14 @@
 package com.self.userauth.service.impl;
 
-import java.util.List;
+import java.util.stream.Collectors;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 
+import com.self.userauth.dto.UserDTO;
+import com.self.userauth.mapper.UserMapper;
 import com.self.userauth.model.User;
 import com.self.userauth.repository.UserRepository;
 import com.self.userauth.service.inter.UserServiceInter;
@@ -39,8 +44,16 @@ public class UserService implements UserServiceInter {
 	}
 
 	@Override
-	public List<User> getAllUsers() {
-		return userRepository.findAll();
-	}
+	public Page<UserDTO> getAllUsers(Pageable pageable){
+		Page<User> users= userRepository.findAll(pageable);
+		return new PageImpl<>(
+				users.getContent().stream()
+				.map(UserMapper::toDto)
+				.collect(Collectors.toList()),
+				pageable,
+				users.getTotalElements()
+				);
+
+	}	
 
 }

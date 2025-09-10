@@ -1,6 +1,11 @@
 package com.self.userauth.service.inter;
 
 import java.util.List;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+
+import com.self.userauth.dto.UserDTO;
 import com.self.userauth.model.User;
 
 public interface UserServiceInter {
@@ -14,6 +19,6 @@ public interface UserServiceInter {
 	// Delete a user
 	void deleteUser(String userId);
 
-	// Get all users (for admin purposes) add pagination support 
-	List<User> getAllUsers();
+	// Get all users  
+	Page<UserDTO> getAllUsers(Pageable pageable);
 }
