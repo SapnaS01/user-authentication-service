@@ -9,6 +9,6 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class AuthResponse {
 	private boolean success;
-	private String status;
-	private Object data; 
+    private String status;
+    private Object data; 
 }
